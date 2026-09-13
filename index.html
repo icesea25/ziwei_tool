@@ -1328,6 +1328,15 @@ function captureChartAsImage(){
 }
 function saveOrShareImage(blob){
   var fileName = '紫微命盤_'+Date.now()+'.png';
+  var isAndroid = /Android/i.test(navigator.userAgent);
+  // Android 的分享面板列的是「哪些 App 能接收檔案」，通常沒有內建的「儲存影像」動作，
+  // 使用者常常找不到能存進相簿的選項；乾脆直接觸發下載，圖片會進「下載」資料夾，
+  // 大多數 Android 相簿 App 也會一併顯示下載資料夾裡的圖片。
+  // iOS 的分享面板本身就有「儲存影像」，直接存進「照片」，維持原本的分享優先邏輯。
+  if(isAndroid){
+    downloadBlob(blob, fileName);
+    return;
+  }
   // 手機瀏覽器優先用原生分享面板（裡面通常就有「儲存影像」／「加入照片」選項，
   // 這是網頁能做到「存進相簿」最接近、也最可靠的方式）。
   // canShare 有些舊版 iOS Safari 沒實作，所以就算沒有 canShare 也直接試 share()，
