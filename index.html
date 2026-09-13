@@ -1144,15 +1144,18 @@ function renderCompass(){
     var liuInfoOuter = activeLiunianInfo();
     var daxInfoOuter = activeDaxianInfo();
     if(liuInfoOuter){
-      // 已選流年：顯示流年十二個月分別落在哪一宮（流年斗君算法）
+      // 已選流年：顯示流年當年實際各月分別落在哪一宮（流年斗君算法），
+      // 用真實掃描過的月份清單，正確處理該年可能出現的閏月
       var monthStemStart = YIN_STEM_START[liuInfoOuter.stemIdx];
       var monthPalaceOfDouJun = (liuInfoOuter.branchIdx - (c.month-1) + 24) % 12;
       var douJunBranch = (monthPalaceOfDouJun + c.hourIdx) % 12;
-      for(var m=1;m<=12;m++){
-        var branchOfMonth = (douJunBranch + (m-1)) % 12;
-        var monthStemIdx = (monthStemStart + (m-1))%10;
-        daxAgeMap[branchOfMonth] = MONTH_NAMES[m-1]+TG[monthStemIdx];
-      }
+      var monthsOfYear = getLunarMonthsOfYear(liuInfoOuter.year);
+      monthsOfYear.forEach(function(mo, idx){
+        var branchOfMonth = (douJunBranch + idx) % 12;
+        var monthStemIdx = (monthStemStart + idx)%10;
+        var label = (mo.isLeap?'閏':'')+MONTH_NAMES[mo.month-1]+TG[monthStemIdx];
+        daxAgeMap[branchOfMonth] = label;
+      });
     } else if(daxInfoOuter){
       // 已選大限（沒選流年）：顯示每個宮位在「這個大限」裡對應到的西元年、歲數
       var baseYear = c.meta.lunar.year;
@@ -1440,13 +1443,36 @@ function activeLiunianInfo(){
 }
 function liuyuePalaceK(){
   var ln = activeLiunianInfo();
-  if(!ln || !STATE.scope.liuyueMonth) return null;
-  return (ln.refK + (STATE.scope.liuyueMonth-1))%12;
+  var c = STATE.chart;
+  if(!ln || !STATE.scope.liuyueMonth || !c) return null;
+  // 選單顯示的是國曆月份，國曆一個月常常橫跨兩個農曆月，用哪一天代表這個月會影響換算結果；
+  // 如果使用者已經選了流日，就直接用那一天實際對應的農曆月份，最準確；
+  // 還沒選流日（只選了月）時才退回用月中（15日）當代表日估算。
+  var anchorDay = STATE.scope.liuriDay || 15;
+  var gDate = carrierDate(ln.year, STATE.scope.liuyueMonth, anchorDay, 12, 0);
+  var lunar = solarToLunar(gDate);
+  var effectiveMonth = lunar.month;
+  // 跟外圍「大限/年/月」同一套流年斗君算法：先逆數本生月，再順數本生時辰找到斗君（流年正月）宮位，
+  // 之後二月、三月…沿順時針（地支遞增）方向逐宮遞推
+  var monthPalaceOfDouJun = (ln.branchIdx - (c.month-1) + 24) % 12;
+  var douJunBranch = (monthPalaceOfDouJun + c.hourIdx) % 12;
+  var branchOfMonth = (douJunBranch + (effectiveMonth-1)) % 12;
+  var p = c.palaces.find(function(pp){ return pp.branchIdx===branchOfMonth; });
+  return p ? p.k : null;
 }
 function liuriPalaceK(){
-  var base = liuyuePalaceK();
-  if(base===null || !STATE.scope.liuriDay) return null;
-  return (base + (STATE.scope.liuriDay-1))%12;
+  var ln = activeLiunianInfo();
+  var c = STATE.chart;
+  if(!ln || !STATE.scope.liuyueMonth || !STATE.scope.liuriDay || !c) return null;
+  // 選單選的是國曆年月日，這裡換算成確切的農曆月、日，再排流日宮位
+  var gDate = carrierDate(ln.year, STATE.scope.liuyueMonth, STATE.scope.liuriDay, 12, 0);
+  var lunar = solarToLunar(gDate);
+  var monthPalaceOfDouJun = (ln.branchIdx - (c.month-1) + 24) % 12;
+  var douJunBranch = (monthPalaceOfDouJun + c.hourIdx) % 12;
+  var branchOfMonth = (douJunBranch + (lunar.month-1)) % 12;
+  var dayBranch = (branchOfMonth + (lunar.day-1)) % 12;
+  var p = c.palaces.find(function(pp){ return pp.branchIdx===dayBranch; });
+  return p ? p.k : null;
 }
 
 function renderAll(){
@@ -1705,17 +1731,24 @@ function renderDetail(){
   var daxInfo = activeDaxianInfo();
   var liuInfo = activeLiunianInfo();
   if(liuInfo){
-    // 已選流年：這裡改顯示這個宮位對應到流年的哪個月（跟外圍「大限/年/月」同一套斗君算法）
+    // 已選流年：這裡改顯示這個宮位對應到流年的哪個月（跟外圍「大限/年/月」同一套斗君算法，
+    // 用真實掃描過的月份清單，正確處理該年可能出現的閏月）
     var monthStemStart = YIN_STEM_START[liuInfo.stemIdx];
     var monthPalaceOfDouJun = (liuInfo.branchIdx - (c.month-1) + 24) % 12;
     var douJunBranch = (monthPalaceOfDouJun + c.hourIdx) % 12;
-    var foundMonth=null, foundMonthStem=null;
-    for(var m=1;m<=12;m++){
-      var branchOfMonth = (douJunBranch + (m-1)) % 12;
-      if(branchOfMonth===p.branchIdx){ foundMonth=m; foundMonthStem=(monthStemStart+(m-1))%10; break; }
+    var monthsOfYear = getLunarMonthsOfYear(liuInfo.year);
+    var foundLabel=null;
+    for(var mi=0; mi<monthsOfYear.length; mi++){
+      var branchOfMonth = (douJunBranch + mi) % 12;
+      if(branchOfMonth===p.branchIdx){
+        var mo = monthsOfYear[mi];
+        var monthStemIdx = (monthStemStart + mi)%10;
+        foundLabel = (mo.isLeap?'閏':'')+MONTH_NAMES[mo.month-1]+TG[monthStemIdx];
+        break;
+      }
     }
-    if(foundMonth!==null){
-      html += '<div class="row"><b>流月：</b>'+MONTH_NAMES[foundMonth-1]+TG[foundMonthStem]+'</div>';
+    if(foundLabel!==null){
+      html += '<div class="row"><b>流月：</b>'+foundLabel+'</div>';
     } else {
       html += '<div class="row"><b>大限：</b>'+p.ageStart+' ~ '+p.ageEnd+' 歲</div>';
     }
@@ -1765,6 +1798,8 @@ function enterLiunian(year){
     var dp = c.palaces.find(function(p){ return p.ageStart<=age && age<=p.ageEnd; });
     if(dp) STATE.scope.daxianStep = dp.k;
   }
+  populateLiuyueOptions();
+  populateLiuriOptions();
   renderAll();
 }
 
@@ -1786,6 +1821,54 @@ function populateLiunianOptions(){
   }
 }
 
+/* 掃描整個農曆年實際有哪些「月」（依真實國曆日期逐日核對），正確處理閏月：
+   閏月會被列成單獨一個流月選項，順序照真實曆法排列，不是天真地假設每年都剛好12個月 */
+function getLunarMonthsOfYear(year){
+  var months = [];
+  var d = carrierDate(year, 1, 21, 0, 0); // 農曆新年最早落在西曆1/21附近，從這裡開始掃描
+  var endGuard = carrierDate(year+1, 3, 1, 0, 0);
+  var cur = null;
+  while(d.getTime() < endGuard.getTime()){
+    var lu = solarToLunar(d);
+    if(lu.year===year){
+      var key = lu.month+(lu.isLeap?'L':'');
+      if(!cur || cur.key!==key){
+        cur = {key:key, month:lu.month, isLeap:lu.isLeap, start:new Date(d.getTime()), days:0};
+        months.push(cur);
+      }
+      cur.days++;
+    } else if(lu.year>year && months.length>0){
+      break;
+    }
+    d = new Date(d.getTime()+86400000);
+  }
+  return months;
+}
+
+function populateLiuyueOptions(){
+  var lySel = document.getElementById('lySel');
+  var prevVal = lySel.value;
+  lySel.innerHTML='<option value="0">未選擇</option>';
+  for(var m=1;m<=12;m++){
+    var opt3=document.createElement('option'); opt3.value=m; opt3.textContent=m+'月';
+    lySel.appendChild(opt3);
+  }
+  if(prevVal) lySel.value = prevVal;
+}
+
+function populateLiuriOptions(){
+  var lrSel = document.getElementById('lrSel');
+  var prevVal = lrSel.value;
+  lrSel.innerHTML='<option value="0">未選擇</option>';
+  var y = STATE.scope.liunianYear, m = STATE.scope.liuyueMonth;
+  var dayCount = (y && y>0 && m) ? new Date(y, m, 0).getDate() : 31;
+  for(var d=1;d<=dayCount;d++){
+    var opt4=document.createElement('option'); opt4.value=d; opt4.textContent=d+'日';
+    lrSel.appendChild(opt4);
+  }
+  if(prevVal) lrSel.value = prevVal;
+}
+
 function populateScopeSelects(){
   var c = STATE.chart;
   var daxSel = document.getElementById('daxSel');
@@ -1798,20 +1881,8 @@ function populateScopeSelects(){
   });
 
   populateLiunianOptions();
-
-  var lySel = document.getElementById('lySel');
-  lySel.innerHTML='<option value="0">未選擇</option>';
-  for(var m=1;m<=12;m++){
-    var opt3=document.createElement('option'); opt3.value=m; opt3.textContent=m+'月';
-    lySel.appendChild(opt3);
-  }
-
-  var lrSel = document.getElementById('lrSel');
-  lrSel.innerHTML='<option value="0">未選擇</option>';
-  for(var d=1;d<=30;d++){
-    var opt4=document.createElement('option'); opt4.value=d; opt4.textContent=d+'日';
-    lrSel.appendChild(opt4);
-  }
+  populateLiuyueOptions();
+  populateLiuriOptions();
 }
 
 document.getElementById('daxSel').addEventListener('change', function(){
@@ -1825,11 +1896,15 @@ document.getElementById('lySel').addEventListener('change', function(){
   var v = parseInt(this.value,10);
   STATE.scope.liuyueMonth = v>0 ? v : null;
   if(!v) STATE.scope.liuriDay = null;
+  populateLiuriOptions();
   renderAll();
 });
 document.getElementById('lrSel').addEventListener('change', function(){
   if(!STATE.scope.liunianYear || STATE.scope.liunianYear<0) enterLiunian(new Date().getFullYear());
-  if(!STATE.scope.liuyueMonth) STATE.scope.liuyueMonth = new Date().getMonth()+1;
+  if(!STATE.scope.liuyueMonth){
+    // 流月選單現在顯示的是國曆月份，預設值直接用「現在」的國曆月份就好，不用再換算成農曆
+    STATE.scope.liuyueMonth = new Date().getMonth()+1;
+  }
   var v = parseInt(this.value,10);
   STATE.scope.liuriDay = v>0 ? v : null;
   renderAll();
